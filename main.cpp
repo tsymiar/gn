@@ -6,9 +6,9 @@
 #endif
 #define required_argument NULL
 #define no_argument NULL
-#define optarg NULL
+#define optarg "NULL"
 #define optind NULL
-#define getopt_long() {}
+#define getopt_long(_1,_2,_3,_4,_5) {}
 struct option { const char* _1; void* _2; void* _3; char _4; };
 #else
 #include <unistd.h>
@@ -40,13 +40,14 @@ static void gettimeofday(struct timeval* tp, struct timezone* tzp)
 }
 static void usleep(unsigned long usec)
 {
-    HANDLE timer;
     LARGE_INTEGER interval;
     interval.QuadPart = -long(10 * usec);
-    timer = CreateWaitableTimer(NULL, TRUE, NULL);
-    SetWaitableTimer(timer, &interval, 0, NULL, NULL, 0);
-    WaitForSingleObject(timer, INFINITE);
-    CloseHandle(timer);
+    HANDLE time = CreateWaitableTimer(NULL, TRUE, NULL);
+    if (time != NULL) {
+        SetWaitableTimer(time, &interval, 0, NULL, NULL, 0);
+        WaitForSingleObject(time, INFINITE);
+        CloseHandle(time);
+    }
 }
 #endif
 
@@ -92,7 +93,10 @@ std::vector<T> string2vector(const std::string& str, const char* split = ",")
     char* p = strtok(s, split);
     T a;
     while (p != nullptr) {
-        sscanf(p, "%llx", &a);
+        int v = sscanf(p, "%llx", &a);
+        if (v <= 0) {
+            break;
+        }
         vec.push_back(a);
         p = strtok(nullptr, split);
     }
