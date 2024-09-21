@@ -38,7 +38,7 @@ static void gettimeofday(struct timeval* tp, struct timezone* tzp)
     tp->tv_sec = (long)((ularge.QuadPart - epoch) / 10000000L);
     tp->tv_usec = (long)(system_time.wMilliseconds * 1000);
 }
-static void usleep(unsigned long usec)
+static void ussleep(unsigned long usec)
 {
     LARGE_INTEGER interval;
     interval.QuadPart = -long(10 * usec);
@@ -60,7 +60,7 @@ struct Runtime {
 
 namespace {
     const char* g_file = "test";
-    uint64_t g_total = 1048576;
+    uint64_t g_total = 0x100000;
     int g_bits = 32;
     bool g_decrease = 0;
     int g_endian = 0;
@@ -117,7 +117,7 @@ int main(int argc, char* argv[])
     std::thread task(
         [&]()->void {
             while (true) {
-                msleep(100);
+                msleep(10);
                 if (!g_runtime.kmg) {
                     continue;
                 }
@@ -365,7 +365,7 @@ void parse_args(int argc, char** argv)
 void msleep(unsigned long ms)
 {
 #if (defined _WIN32) && (!defined __GNUC__)
-    usleep(1000 * ms);
+    ussleep(ms * 1000);
 #else
     struct timespec ts = {
         .tv_sec = static_cast<long>(ms / 1000),
