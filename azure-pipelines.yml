@@ -1,0 +1,15 @@
+# C/C++ with GCC
+
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+- script: |
+    ./build.sh
+  displayName: 'make exec'
+- script: |
+    ./build.sh clean
+  displayName: 'clean all'
