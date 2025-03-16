@@ -8,7 +8,7 @@ pool:
 
 steps:
 - script: |
-    ./build.sh
+    ./build.sh -j
   displayName: 'make exec'
 - script: |
     ./build.sh clean

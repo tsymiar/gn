@@ -8,5 +8,5 @@ else
     fi
     cd "${BIN}"
     cmake ..
-    make $1
+    make "${1}"
 fi

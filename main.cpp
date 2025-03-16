@@ -60,13 +60,13 @@ struct Runtime {
 
 namespace {
     const char* g_file = "test";
-    uint64_t g_total = 0x100000;
+    volatile uint64_t g_total = 0x100000;
     int g_bits = 32;
     bool g_decrease = 0;
     int g_endian = 0;
     int g_interval = 1;
     std::vector<uint64_t> g_begins;
-    Runtime g_runtime = {};
+    volatile Runtime g_runtime = {};
 };
 
 union Number {
