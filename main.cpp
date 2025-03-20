@@ -156,6 +156,11 @@ int main(int argc, char* argv[])
         fprintf(stderr, "fwrite open '%s' failed: %s\n", g_file, strerror(errno));
         return -1;
     }
+
+    const size_t BuffSize = 1024 * 1024; // 1M
+    char* buff = new char[BuffSize];
+    setvbuf(fp, buff, _IOFBF, BuffSize);
+
     size_t length = g_begins.size();
     std::vector<uint64_t> values = g_begins;
     if (length == 0) {
@@ -213,6 +218,7 @@ int main(int argc, char* argv[])
         }
     }
     fclose(fp);
+    delete[] buff;
     if (status != 0) return status;
     fprintf(stdout, "\n%llu bytes write done, average speed %.3f M/s.\n", static_cast<uint64_t>(length * count * size),
         (g_runtime.total * 1.f) / (gettime4usec() - start) * 0x100000 / 1000000.f);
