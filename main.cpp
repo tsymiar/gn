@@ -290,7 +290,7 @@ void usage_exit(const char* argv0)
         "\nUsage: %s [option] ARGUMENT\n"
         "\n"
         "-f | --file      FILENAME        Name of the file to save, required.\n"
-        "-n | --total     SIZE(K/M/G)     Number of total size to write, required.\n"
+        "-t | --total     SIZE(K/M/G)     Number of total size to write, required.\n"
         "-b | --bits      8/16/32/64      Bit width of every number. (default: 32)\n"
         "-d | --decrease  0/1             Number to be increasing(0) or decreasing(1). (default: 0)\n"
         "-e | --endian    1/0             Big endian(1) or small endian(0). (default: 0)\n"
@@ -307,7 +307,7 @@ void parse_args(int argc, char** argv)
 {
     static struct option opts[] = {
             { "file",     required_argument, NULL, 'f' },
-            { "total",    required_argument, NULL, 'n' },
+            { "total",    required_argument, NULL, 't' },
             { "bits",     no_argument,       NULL, 'b' },
             { "decrease", no_argument,       NULL, 'd' },
             { "endian",   no_argument,       NULL, 'e' },

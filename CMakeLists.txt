@@ -7,7 +7,6 @@ IF (NOT WIN32)
     SET(EXTRA_LIBS pthread)
 ENDIF()
 
-#ADD_DEFINITIONS("-Wno-extra")
 SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 SET(EXEC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/build)
 
@@ -17,9 +16,7 @@ TARGET_LINK_LIBRARIES(${_TARGET} ${EXTRA_LIBS})
 INSTALL(TARGETS ${_TARGET} RUNTIME DESTINATION .)
 
 IF (${CMAKE_HOST_SYSTEM_NAME} MATCHES "Linux")
-    SET(EXEC_PATH /usr/local/bin/)
-    SET(HINT_MSG ", build by 'root' to install it")
-ELSEIF(${CMAKE_HOST_SYSTEM_NAME} MATCHES "Darwin")
+    #ADD_DEFINITIONS("-Wno-extra")
     ADD_DEFINITIONS("-Wno-format")
 ENDIF()
 
@@ -37,6 +34,5 @@ ADD_CUSTOM_COMMAND(
     TARGET ${_TARGET}
     POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory ${EXEC_PATH}
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_BINARY_DIR}/${_TARGET_} ${EXEC_PATH}
-    COMMENT "-- 'gn' is a cross-platform tool to generatting numbers${HINT_MSG}."
+    COMMENT "-- 'gn' is a cross-platform tool to generate numbers."
 )
