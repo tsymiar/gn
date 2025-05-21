@@ -23,6 +23,9 @@ struct option { const char* _1; void* _2; void* _3; char _4; };
 #include <string>
 #include <thread>
 #include <vector>
+#if defined(_USE_OMP)
+#include <omp.h>
+#endif
 
 #if (defined _WIN32) && (!defined __GNUC__)
 static const unsigned __int64 epoch = ((unsigned __int64)116444736000000000ULL);
@@ -86,7 +89,7 @@ uint64_t size2bytes(const std::string& value);
 void msleep(unsigned long ms);
 
 template<class T>
-std::vector<T> string2vector(const std::string& str, const char* split = ",")
+std::vector<T> splitBegins(const std::string& str, const char* split = ",")
 {
     std::vector<T> vec;
     char* s = const_cast<char*>(str.c_str());
@@ -177,8 +180,21 @@ int main(int argc, char* argv[])
     uint64_t count = g_total / size;
     uint64_t start = gettime4usec();
     int status = 0;
+#if defined(_USE_OMP)
+#ifdef _WIN32
 #pragma omp parallel for
+#else
+#pragma omp simd
+#endif
+#endif
     for (uint64_t j = 0; j < count; j++) {
+#if defined(_USE_OMP)
+#ifdef _WIN32
+#pragma omp parallel for
+#else
+#pragma omp simd
+#endif
+#endif
         for (size_t i = 0; i < length; i++) {
             Number number{};
             number._64v = values[i];
@@ -266,28 +282,35 @@ void byteSwap32(uint32_t* val)
 uint64_t size2bytes(const std::string& value)
 {
     uint64_t u64_size = 0;
-    for (size_t i = 0; i < value.size(); ++i) {
-        if (value[i] >= '0' && value[i] <= '9') {
-            u64_size = u64_size * 10 + value[i] - '0';
-        } else if (value[i] == 'T') {
-            u64_size = u64_size * 1024 * 1024 * 1024 * 1024;
-        } else if (value[i] == 'G') {
-            u64_size *= 1024 * 1024 * 1024;
-        } else if (value[i] == 'M') {
-            u64_size *= 1024 * 1024;
-        } else if (value[i] == 'K') {
-            u64_size *= 1024;
-        } else {
-            continue;
-        }
+    size_t pos = value.find_first_of("KMGTP");
+    std::string num_part = value.substr(0, pos);
+    std::string unit_part = (pos != std::string::npos) ? value.substr(pos, 1) : "";
+    double dsize = 0;
+    try {
+        dsize = std::stod(num_part);
+    } catch (...) {
+        dsize = 0;
     }
+    if (unit_part == "T") {
+        dsize *= 1024 * 1024 * 1024 * 1024ULL;
+    } else if (unit_part == "G") {
+        dsize *= 1024 * 1024 * 1024ULL;
+    } else if (unit_part == "M") {
+        dsize *= 1024 * 1024ULL;
+    } else if (unit_part == "K") {
+        dsize *= 1024ULL;
+    }
+    u64_size = static_cast<uint64_t>(dsize);
     return u64_size;
 }
 
 void usage_exit(const char* argv0)
 {
     fprintf(stderr,
-        "\nUsage: %s [option] ARGUMENT\n"
+        "\nUsage: %s [options] ARGUMENT\n"
+#if defined(_USE_OMP)
+        "\tusing OpenMP\n"
+#endif
         "\n"
         "-f | --file      FILENAME        Name of the file to save, required.\n"
         "-t | --total     SIZE(K/M/G)     Number of total size to write, required.\n"
@@ -318,14 +341,14 @@ void parse_args(int argc, char** argv)
     while (1) {
         int idx;
         char* tail;
-        int c = getopt_long(argc, argv, "f:n:b:d:e:i:s:", opts, &idx);
+        int c = getopt_long(argc, argv, "f:t:b:d:e:i:s:", opts, &idx);
         if (c == -1) break;
 
         switch (c) {
         case 'f':
             g_file = optarg;
             break;
-        case 'n':
+        case 't':
             if (std::string(optarg).find("0x") == 0) {
                 g_total = strtoul(optarg, &tail, 16);
                 if (*tail) {
@@ -351,7 +374,7 @@ void parse_args(int argc, char** argv)
             g_interval = atoi(optarg);
             break;
         case 's':
-            g_begins = string2vector<uint64_t>(optarg);
+            g_begins = splitBegins<uint64_t>(optarg);
             break;
         case '?':
             usage_exit(argv[0]);
