@@ -26,6 +26,7 @@ struct option { const char* _1; void* _2; void* _3; char _4; };
 #if defined(_USE_OMP)
 #include <omp.h>
 #endif
+#include <atomic>
 
 #if (defined _WIN32) && (!defined __GNUC__)
 static const unsigned __int64 epoch = ((unsigned __int64)116444736000000000ULL);
@@ -54,22 +55,17 @@ static void ussleep(unsigned long usec)
 }
 #endif
 
-struct Runtime {
-    bool kmg;
-    float prog;
-    uint64_t bytes;
-    uint64_t total;
-};
-
 namespace {
     const char* g_file = "test";
-    volatile uint64_t g_total = 0x100000;
+    uint64_t g_total = 0x100000;
     int g_bits = 32;
     bool g_decrease = 0;
     int g_endian = 0;
     int g_interval = 1;
     std::vector<uint64_t> g_begins;
-    volatile Runtime g_runtime = {};
+    std::atomic<uint64_t> g_bytes_written{0};
+    std::atomic<uint64_t> g_bytes_total{0};
+    std::atomic<bool> g_running{false};
 };
 
 union Number {
@@ -82,7 +78,7 @@ union Number {
 void parse_args(int argc, char** argv);
 void usage_exit(const char* argv0 = "");
 uint64_t gettime4usec();
-bool isSmallEndian();
+bool isLittleEndian();
 void byteSwap16(uint16_t* val);
 void byteSwap32(uint32_t* val);
 uint64_t size2bytes(const std::string& value);
@@ -110,34 +106,31 @@ int main(int argc, char* argv[])
 {
 #if (defined _WIN32) && (!defined __GNUC__)
     fprintf(stdout, "\nOptions: file '%s' size=%lld, %d bits, interval=%d, %s, %s.\n", g_file, g_total, g_bits, g_interval,
-        g_decrease ? "decrease" : "increase", g_endian ? "bigendian" : "small-endian");
+        g_decrease ? "decrease" : "increase", g_endian ? "big-endian" : "little-endian");
 #else
     if (argc <= 1) {
         usage_exit(argv[0]);
     }
     parse_args(argc, argv);
 #endif
-    std::thread task(
-        [&]()->void {
-            while (true) {
-                msleep(10);
-                if (!g_runtime.kmg) {
-                    continue;
-                }
-                g_runtime.prog = g_runtime.bytes * 100.f / g_runtime.total;
-                fprintf(stdout, "\r%.3f %%", g_runtime.prog);
-                fflush(stdout);
-            }
+    std::thread task([&]() {
+        while (g_running.load(std::memory_order_acquire)) {
+            msleep(10);
+            uint64_t total = g_bytes_total.load(std::memory_order_relaxed);
+            if (total == 0) continue;
+            float prog = g_bytes_written.load(std::memory_order_relaxed) * 100.0f / total;
+            fprintf(stdout, "\r%.3f %%", prog);
+            fflush(stdout);
         }
-    );
+    });
     if (task.joinable()) {
         task.detach();
     }
     size_t size = 0;
-    bool small = isSmallEndian();
-    bool byteswap = !small;
+    bool little = isLittleEndian();
+    bool byteswap = !little;
     if (g_endian == 0) {
-        byteswap = small;
+        byteswap = little;
     }
     switch (g_bits) {
     case 8:
@@ -170,31 +163,17 @@ int main(int argc, char* argv[])
         values.push_back(0);
         length++;
     }
-    g_runtime.total = g_total * length;
+    g_bytes_total.store(g_total * length, std::memory_order_relaxed);
     if (g_total < size) {
         fprintf(stderr, "Total size must upper than unit size, actually: %llu < %zu.\n", g_total, size);
         usage_exit(argv[0]);
     } else {
-        g_runtime.kmg = true;
+        g_running.store(true, std::memory_order_release);
     }
     uint64_t count = g_total / size;
     uint64_t start = gettime4usec();
     int status = 0;
-#if defined(_USE_OMP)
-#ifdef _WIN32
-#pragma omp parallel for
-#else
-#pragma omp simd
-#endif
-#endif
     for (uint64_t j = 0; j < count; j++) {
-#if defined(_USE_OMP)
-#ifdef _WIN32
-#pragma omp parallel for
-#else
-#pragma omp simd
-#endif
-#endif
         for (size_t i = 0; i < length; i++) {
             Number number{};
             number._64v = values[i];
@@ -207,7 +186,7 @@ int main(int argc, char* argv[])
 #ifdef __GNUC__
                             number._64v = __builtin_bswap64(reinterpret_cast<uint64_t>(number._64v));
 #else
-                            if (small) {
+                            if (little) {
                                 number._64v = htonll(number._64v);
                             } else {
                                 number._64v = ntohll(number._64v);
@@ -225,7 +204,7 @@ int main(int argc, char* argv[])
                 fprintf(stderr, "fwrite(file=%s) failed: %s\n", g_file, strerror(errno));
                 status = -2;
             }
-            g_runtime.bytes += size;
+            g_bytes_written.fetch_add(size, std::memory_order_relaxed);
             if (!g_decrease) {
                 values[i] += g_interval;
             } else {
@@ -233,11 +212,14 @@ int main(int argc, char* argv[])
             }
         }
     }
+    g_running.store(false, std::memory_order_release);
     fclose(fp);
     delete[] buff;
     if (status != 0) return status;
-    fprintf(stdout, "\n%llu bytes write done, average speed %.3f M/s.\n", static_cast<uint64_t>(length * count * size),
-        (g_runtime.total * 1.f) / (gettime4usec() - start) * 0x100000 / 1000000.f);
+    uint64_t total_bytes = g_bytes_written.load(std::memory_order_relaxed);
+    fprintf(stdout, "\n%llu bytes write done, average speed %.3f M/s.\n",
+        static_cast<uint64_t>(total_bytes),
+        total_bytes * 1.0f / (gettime4usec() - start) * 0x100000 / 1000000.f);
 }
 
 uint64_t gettime4usec()
@@ -247,14 +229,14 @@ uint64_t gettime4usec()
     return (tv.tv_sec * 1000000ULL + tv.tv_usec);
 }
 
-bool isSmallEndian()
+bool isLittleEndian()
 {
     union {
         int i;
         char c;
     } v;
     v.i = 1;
-    return (!(v.c == 1));
+    return (v.c == 1);
 }
 
 void byteSwap16(uint16_t* val)
@@ -274,7 +256,7 @@ void byteSwap24(uint32_t* val)
 void byteSwap32(uint32_t* val)
 {
     uint32_t v = *val;
-    *val = (((v & 0xff00) << 24)
+    *val = (((v & 0xff) << 24)
         | ((v & 0xff00) << 8) | ((v & 0xff0000) >> 8)
         | ((v >> 24) & 0xff));
 }
@@ -316,7 +298,7 @@ void usage_exit(const char* argv0)
         "-t | --total     SIZE(K/M/G)     Number of total size to write, required.\n"
         "-b | --bits      8/16/32/64      Bit width of every number. (default: 32)\n"
         "-d | --decrease  0/1             Number to be increasing(0) or decreasing(1). (default: 0)\n"
-        "-e | --endian    1/0             Big endian(1) or small endian(0). (default: 0)\n"
+        "-e | --endian    1/0             Big endian(1) or little endian(0). (default: 0)\n"
         "-i | --interval  VALUE           Interval value between next number. (default: 1)\n"
         "-s | --start     HEX             Start number value 0x123. (default: 0x0)\n"
         "                                 Multi-channels if separate by ','. (eg.: 0x0,0x321,0xff)\n"
