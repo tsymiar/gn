@@ -65,6 +65,7 @@ namespace {
     std::vector<uint64_t> g_begins;
     std::atomic<uint64_t> g_bytes_written{0};
     std::atomic<uint64_t> g_bytes_total{0};
+    std::atomic<bool> g_started{ false };
     std::atomic<bool> g_running{false};
 };
 
@@ -114,18 +115,25 @@ int main(int argc, char* argv[])
     parse_args(argc, argv);
 #endif
     std::thread task([&]() {
-        while (g_running.load(std::memory_order_acquire)) {
+        while (!g_started.load(std::memory_order_acquire)) {
             msleep(10);
+        }
+        do {
             uint64_t total = g_bytes_total.load(std::memory_order_relaxed);
-            if (total == 0) continue;
-            float prog = g_bytes_written.load(std::memory_order_relaxed) * 100.0f / total;
-            fprintf(stdout, "\r%.3f %%", prog);
+            if (total > 0) {
+                float prog = g_bytes_written.load(std::memory_order_relaxed) * 100.0f / total;
+                fprintf(stdout, "\r%.3f %%", prog);
+                fflush(stdout);
+            }
+            std::this_thread::yield();
+        } while (g_running.load(std::memory_order_acquire));
+        // show final 100% after loop exits
+        uint64_t total = g_bytes_total.load(std::memory_order_relaxed);
+        if (total > 0) {
+            fprintf(stdout, "\r100.000 %%");
             fflush(stdout);
         }
-    });
-    if (task.joinable()) {
-        task.detach();
-    }
+        });
     size_t size = 0;
     bool little = isLittleEndian();
     bool byteswap = !little;
@@ -150,11 +158,14 @@ int main(int argc, char* argv[])
     FILE* fp = fopen(g_file, "wb+");
     if (fp == nullptr) {
         fprintf(stderr, "fwrite open '%s' failed: %s\n", g_file, strerror(errno));
+        g_started.store(true, std::memory_order_release);
+        g_running.store(false, std::memory_order_release);
+        if (task.joinable()) task.join();
         return -1;
     }
 
-    const size_t BuffSize = 1024 * 1024; // 1M
-    char* buff = new char[BuffSize];
+    static constexpr size_t BuffSize = 1024 * 1024; // 1M
+    char buff[BuffSize];
     setvbuf(fp, buff, _IOFBF, BuffSize);
 
     size_t length = g_begins.size();
@@ -168,6 +179,7 @@ int main(int argc, char* argv[])
         fprintf(stderr, "Total size must upper than unit size, actually: %llu < %zu.\n", g_total, size);
         usage_exit(argv[0]);
     } else {
+        g_started.store(true, std::memory_order_release);
         g_running.store(true, std::memory_order_release);
     }
     uint64_t count = g_total / size;
@@ -184,7 +196,7 @@ int main(int argc, char* argv[])
                         break;
                         case sizeof(uint64_t) :
 #ifdef __GNUC__
-                            number._64v = __builtin_bswap64(reinterpret_cast<uint64_t>(number._64v));
+                            number._64v = __builtin_bswap64(number._64v);
 #else
                             if (little) {
                                 number._64v = htonll(number._64v);
@@ -213,13 +225,14 @@ int main(int argc, char* argv[])
         }
     }
     g_running.store(false, std::memory_order_release);
+    if (task.joinable()) task.join();
     fclose(fp);
-    delete[] buff;
     if (status != 0) return status;
     uint64_t total_bytes = g_bytes_written.load(std::memory_order_relaxed);
     fprintf(stdout, "\n%llu bytes write done, average speed %.3f M/s.\n",
         static_cast<uint64_t>(total_bytes),
         total_bytes * 1.0f / (gettime4usec() - start) * 0x100000 / 1000000.f);
+    return 0;
 }
 
 uint64_t gettime4usec()
@@ -318,7 +331,7 @@ void parse_args(int argc, char** argv)
             { "endian",   no_argument,       NULL, 'e' },
             { "interval", no_argument,       NULL, 'i' },
             { "start",    no_argument,       NULL, 's' },
-            { 0 }
+            { 0, 0, 0, 0 }
     };
     while (1) {
         int idx;
